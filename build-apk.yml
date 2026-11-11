@@ -1,0 +1,70 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install npm packages
+        run: npm install
+
+      - name: Prepare www folder
+        run: |
+          mkdir -p www
+          if [ -f index.html ]; then mv index.html www/index.html; fi
+          mv d_*.js www/ 2>/dev/null || true
+          ls -la www
+
+      # اللعبة بتحمّل مكتبات three.js من الإنترنت، فهنحطها جوه التطبيق عشان يشتغل أوفلاين
+      - name: Bundle libraries locally
+        run: |
+          cp node_modules/three/build/three.min.js www/three.min.js
+          cp node_modules/three/examples/js/loaders/GLTFLoader.js www/GLTFLoader.js
+          cp node_modules/meshoptimizer/meshopt_decoder.js www/meshopt_decoder.js
+          sed -i \
+            -e 's|https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js|three.min.js|g' \
+            -e 's|https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js|three.min.js|g' \
+            -e 's|https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js|GLTFLoader.js|g' \
+            -e 's|https://cdn.jsdelivr.net/npm/meshoptimizer@0.18.1/meshopt_decoder.js|meshopt_decoder.js|g' \
+            www/index.html
+          echo "Remaining CDN references:"
+          grep -o 'https://cdn[^"]*' www/index.html || echo "none"
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync web assets
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sekka-masr-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
